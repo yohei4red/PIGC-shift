@@ -195,9 +195,9 @@ for i, staff in enumerate(all_staffs):
                     
                     state = st.session_state.gui_states[staff][d_id]
                     if staff in cross_staffs:
-                        labels = {0: f"⭕️両方\n{btn_date_text}", 1: f"🔺午前\n{btn_date_text}" ,2: f"❌休み\n{btn_date_text}"}
+                        labels = {0: f"🔴両方\n{btn_date_text}", 1: f"🟠午前\n{btn_date_text}" ,2: f"❎休み\n{btn_date_text}"}
                     else:
-                        labels = {0: f"⭕️出勤\n{btn_date_text}", 1: f"❌休み\n{btn_date_text}"}
+                        labels = {0: f"🔴出勤\n{btn_date_text}", 1: f"❎休み\n{btn_date_text}"}
                     cols[c_idx].button(labels[state], key=f"b_{staff}_{d_id}", on_click=toggle_state, args=(staff, d_id), use_container_width=True)
 
 st.divider()
