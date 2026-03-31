@@ -11,8 +11,6 @@ import japanize_matplotlib  # クラウド用日本語フォント
 from datetime import datetime, timedelta
 import random
 
-# Mac用フォント設定は不要になったので削除（japanize_matplotlibが代行）
-
 st.set_page_config(page_title="PIGC シフト自動作成アプリ", layout="wide")
 
 # ==========================================
@@ -54,7 +52,7 @@ with st.sidebar.form(key='settings_form'):
     })
     edited_rules = st.data_editor(df_rules, hide_index=True)
 
-    # ★ここが重要：スマホ利用者のための「更新ボタン」
+    # スマホ利用者のための「更新ボタン」
     submit_button = st.form_submit_button(label='🔄 設定をアプリに反映する', use_container_width=True)
 
 # ==========================================
@@ -209,6 +207,7 @@ if st.button("✨ この条件でシフト表を作成する", type="primary", u
     # 目的関数
     prob += pulp.lpSum(1000 * (s_am[d] + s_pm[d]) for d in date_ids) + pulp.lpSum(random.random() * (x_am[s,d] + x_pm[s,d]) for s in all_staffs for d in date_ids)
 
+    # 1日の必要人数（打席2名＋社員）
     for d in date_ids:
         prob += pulp.lpSum(x_am[s, d] for s in all_staffs) + s_am[d] == 2
         prob += pulp.lpSum(x_pm[s, d] for s in all_staffs) + s_pm[d] == 2
@@ -222,22 +221,35 @@ if st.button("✨ この条件でシフト表を作成する", type="primary", u
             elif state == 2: # 午前のみ
                 prob += x_pm[s, d] == 0
 
+            # スタッフのポジション制約
             if s in cross_staffs: prob += x_pm[s, d] <= x_am[s, d]
             elif s in staffs_am: prob += x_pm[s, d] == 0
             elif s in staffs_pm: prob += x_am[s, d] == 0
             else: prob += x_am[s, d] == 0; prob += x_pm[s, d] == 0
 
+    # NGペアの制約
     for p1, p2 in ng_pairs:
         for d in date_ids:
             prob += x_am[p1, d] + x_am[p2, d] <= 1
             prob += x_pm[p1, d] + x_pm[p2, d] <= 1
 
+    # 出勤日数の制約
     for s in all_staffs:
         work = pulp.lpSum(x_am[s, d] if s in staffs_am else x_pm[s, d] for d in date_ids)
         if s in min_shifts: prob += work >= min_shifts[s]
         if s in exact_shifts: prob += work == exact_shifts[s]
 
+    # ★追加部分：最大6連勤の制約（連続する7日間のうち、出勤日数は6日以下にする）
+    for s in all_staffs:
+        for i in range(len(date_ids) - 6):
+            if s in staffs_am:
+                prob += pulp.lpSum(x_am[s, date_ids[i+j]] for j in range(7)) <= 6
+            else:
+                prob += pulp.lpSum(x_pm[s, date_ids[i+j]] for j in range(7)) <= 6
+
     solver = pulp.PULP_CBC_CMD(timeLimit=10, msg=False)
+    
+    # 計算結果の判定
     if prob.solve(solver) == 1:
         ex, pg = generate_files(x_am, x_pm, s_am, s_pm, status_box)
         status_box.success("🎉 シフト作成完了！")
@@ -246,4 +258,5 @@ if st.button("✨ この条件でシフト表を作成する", type="primary", u
         with c2: st.download_button("🖼 画像保存", open(pg, "rb"), "shift.png", use_container_width=True)
         st.image(pg)
     else:
-        status_box.error("条件が厳しすぎて作成できませんでした。")
+        # エラーメッセージを分かりやすく修正
+        status_box.error("⚠️ 条件が厳しすぎてシフトが作成できませんでした。\n\n**【よくある原因】**\n・誰かの休みが多すぎて、他の人が**「最大6連勤」**のルールを超えてしまう\n・「最低出勤日数」や「NGペア」の条件が重なり合って計算できない\n\n👉 休みや出勤日数の条件を少しゆるめて、再度お試しください。")
