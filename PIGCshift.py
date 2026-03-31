@@ -77,9 +77,12 @@ for i in range(num_days):
     date_str = f"{current_date.month}/{current_date.day}"
     day_str = days_map[current_date.weekday()]
     dates_info.append({
-        "id": date_str, "display": f"{day_str}\n{date_str}", 
+        "id": date_str, 
+        "day_str": day_str, # ★曜日を取り出しやすく追加
+        "display": f"{day_str}\n{date_str}", 
         "is_weekend": current_date.weekday() >= 5,
-        "is_sat": current_date.weekday() == 5, "is_sun": current_date.weekday() == 6
+        "is_sat": current_date.weekday() == 5, 
+        "is_sun": current_date.weekday() == 6
     })
 date_ids = [d["id"] for d in dates_info]
 
@@ -184,12 +187,17 @@ for i, staff in enumerate(all_staffs):
             for c_idx in range(7):
                 d_idx = r_idx * 7 + c_idx
                 if d_idx < num_days:
-                    d_id = dates_info[d_idx]["id"]
+                    d_info = dates_info[d_idx]
+                    d_id = d_info["id"]
+                    day_str = d_info["day_str"]
+                    # ★ここで「3/21(土)」の形を作る
+                    btn_date_text = f"{d_id}({day_str})"
+                    
                     state = st.session_state.gui_states[staff][d_id]
                     if staff in cross_staffs:
-                        labels = {0: f"🟢両方\n{d_id}", 1: f"❌休み\n{d_id}", 2: f"🟠午前\n{d_id}"}
+                        labels = {0: f"🟢両方\n{btn_date_text}", 1: f"❌休み\n{btn_date_text}", 2: f"🟠午前\n{btn_date_text}"}
                     else:
-                        labels = {0: f"🟢出勤\n{d_id}", 1: f"❌休み\n{d_id}"}
+                        labels = {0: f"🟢出勤\n{btn_date_text}", 1: f"❌休み\n{btn_date_text}"}
                     cols[c_idx].button(labels[state], key=f"b_{staff}_{d_id}", on_click=toggle_state, args=(staff, d_id), use_container_width=True)
 
 st.divider()
@@ -207,7 +215,6 @@ if st.button("✨ この条件でシフト表を作成する", type="primary", u
     # 目的関数
     prob += pulp.lpSum(1000 * (s_am[d] + s_pm[d]) for d in date_ids) + pulp.lpSum(random.random() * (x_am[s,d] + x_pm[s,d]) for s in all_staffs for d in date_ids)
 
-    # 1日の必要人数（打席2名＋社員）
     for d in date_ids:
         prob += pulp.lpSum(x_am[s, d] for s in all_staffs) + s_am[d] == 2
         prob += pulp.lpSum(x_pm[s, d] for s in all_staffs) + s_pm[d] == 2
@@ -221,25 +228,21 @@ if st.button("✨ この条件でシフト表を作成する", type="primary", u
             elif state == 2: # 午前のみ
                 prob += x_pm[s, d] == 0
 
-            # スタッフのポジション制約
             if s in cross_staffs: prob += x_pm[s, d] <= x_am[s, d]
             elif s in staffs_am: prob += x_pm[s, d] == 0
             elif s in staffs_pm: prob += x_am[s, d] == 0
             else: prob += x_am[s, d] == 0; prob += x_pm[s, d] == 0
 
-    # NGペアの制約
     for p1, p2 in ng_pairs:
         for d in date_ids:
             prob += x_am[p1, d] + x_am[p2, d] <= 1
             prob += x_pm[p1, d] + x_pm[p2, d] <= 1
 
-    # 出勤日数の制約
     for s in all_staffs:
         work = pulp.lpSum(x_am[s, d] if s in staffs_am else x_pm[s, d] for d in date_ids)
         if s in min_shifts: prob += work >= min_shifts[s]
         if s in exact_shifts: prob += work == exact_shifts[s]
 
-    # ★追加部分：最大6連勤の制約（連続する7日間のうち、出勤日数は6日以下にする）
     for s in all_staffs:
         for i in range(len(date_ids) - 6):
             if s in staffs_am:
@@ -248,8 +251,6 @@ if st.button("✨ この条件でシフト表を作成する", type="primary", u
                 prob += pulp.lpSum(x_pm[s, date_ids[i+j]] for j in range(7)) <= 6
 
     solver = pulp.PULP_CBC_CMD(timeLimit=10, msg=False)
-    
-    # 計算結果の判定
     if prob.solve(solver) == 1:
         ex, pg = generate_files(x_am, x_pm, s_am, s_pm, status_box)
         status_box.success("🎉 シフト作成完了！")
@@ -258,5 +259,4 @@ if st.button("✨ この条件でシフト表を作成する", type="primary", u
         with c2: st.download_button("🖼 画像保存", open(pg, "rb"), "shift.png", use_container_width=True)
         st.image(pg)
     else:
-        # エラーメッセージを分かりやすく修正
         status_box.error("⚠️ 条件が厳しすぎてシフトが作成できませんでした。\n\n**【よくある原因】**\n・誰かの休みが多すぎて、他の人が**「最大6連勤」**のルールを超えてしまう\n・「最低出勤日数」や「NGペア」の条件が重なり合って計算できない\n\n👉 休みや出勤日数の条件を少しゆるめて、再度お試しください。")
